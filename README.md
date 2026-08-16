@@ -6,8 +6,9 @@ ThinkPad firmware forgets the keyboard backlight level across sleep and reboot, 
 comes back dark. This fixes that, and adds idle dimming, idle timeout, and separate
 profiles for AC and battery.
 
-**Status: milestone 1 — the hardware layer works.** The `tkbl` CLI can read and set the
-backlight. The tray application is not built yet.
+**Status: milestone 2 — hardware layer and core logic done.** The `tkbl` CLI can read and
+set the backlight, and the idle state machine and settings model are implemented and
+tested. The tray application is not built yet.
 
 ## How it works
 
@@ -73,8 +74,13 @@ raw MLCG    : 0x00050202
 
 ## The hardware has three states
 
-`off`, `low`, `high`. There is no smooth fade and no percentage — "dim" is literally the
-`low` state. The planned active → dim → off behaviour maps onto `high → low → off`.
+`off`, `low`, `high`. There is no percentage — "dim" is literally the `low` state, so the
+active → dim → off behaviour maps onto `high → low → off`.
+
+The firmware animates between levels over roughly a second, so this program never
+implements a fade of its own: it writes the target level and lets the EC ramp. `MLCG`
+reports the *target* level immediately rather than the animated intermediate, so
+reading back straight after a write is reliable.
 
 ## A note on safety
 
@@ -104,8 +110,8 @@ if backlight.is_supported() {
 ## Roadmap
 
 - [x] **1** — HAL + CLI
-- [ ] **2** — idle state machine, settings model, AC/battery profiles
-- [ ] **3** — tray app: raw input wake, power/session events
+- [x] **2** — idle state machine, settings model, AC/battery profiles
+- [ ] **3** — tray app: idle detection, power/session events
 - [ ] **4** — settings window
 - [ ] **5** — autostart, single instance, failure surfacing
 

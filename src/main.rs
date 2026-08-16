@@ -158,7 +158,9 @@ fn parse_level(s: &str) -> Result<Level, String> {
         "off" | "0" => Ok(Level::Off),
         "low" | "dim" | "1" => Ok(Level::Low),
         "high" | "max" | "2" => Ok(Level::High),
-        other => Err(format!("invalid level '{other}' (use off|low|high or 0|1|2)")),
+        other => Err(format!(
+            "invalid level '{other}' (use off|low|high or 0|1|2)"
+        )),
     }
 }
 
@@ -167,6 +169,8 @@ fn parse_u32(s: &str) -> Result<u32, String> {
     let r = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X"));
     match r {
         Some(hex) => u32::from_str_radix(hex, 16).map_err(|e| format!("bad hex '{s}': {e}")),
-        None => t.parse::<u32>().map_err(|e| format!("bad number '{s}': {e}")),
+        None => t
+            .parse::<u32>()
+            .map_err(|e| format!("bad number '{s}': {e}")),
     }
 }

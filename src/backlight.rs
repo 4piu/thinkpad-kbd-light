@@ -7,10 +7,15 @@ use std::io;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use crate::acpi::{AcpiGateway, IOCTL_MLCG, IOCTL_MLCS};
 
 /// Backlight level. The X1C6 panel supports exactly these three.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+///
+/// Ordering is meaningful: `Off < Low < High`. Profile validation relies on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 #[repr(u8)]
 pub enum Level {
     Off = 0,

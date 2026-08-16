@@ -5,6 +5,12 @@
 //! * [`acpi::AcpiGateway`] — evaluate an ACPI method through the Lenovo PM driver.
 //! * [`backlight::Backlight`] — the keyboard backlight, in levels.
 //!
+//! Above the HAL sit two platform-independent pieces, both fully unit-tested against
+//! [`backlight::FakeBacklight`] rather than hardware:
+//!
+//! * [`settings::Settings`] — persisted per-power-source profiles.
+//! * [`engine::Engine`] — the idle state machine.
+//!
 //! The split exists because the driver is a *generic* ACPI evaluator: keeping the
 //! primitive separate makes it cheap to support ThinkPads that expose the backlight under
 //! different method names, and leaves the door open to other firmware features.
@@ -16,6 +22,10 @@
 
 pub mod acpi;
 pub mod backlight;
+pub mod engine;
+pub mod settings;
 
 pub use acpi::AcpiGateway;
 pub use backlight::{Backlight, BacklightController, FakeBacklight, Level};
+pub use engine::{Engine, Phase};
+pub use settings::{PowerSource, Profile, Settings};
