@@ -1,4 +1,7 @@
 .mcp.json
+
+scratch/
+
 # Rust
 /target
 
