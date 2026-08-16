@@ -1,0 +1,30 @@
+[package]
+name = "thinkpad-kbd-light"
+version = "0.1.0"
+edition = "2021"
+description = "Keyboard backlight control for ThinkPads (X1 Carbon 6th and relatives)"
+license = "MIT"
+
+[lib]
+name = "tkbl"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tkbl"
+path = "src/main.rs"
+
+[dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",          # SECURITY_ATTRIBUTES, referenced by CreateFileW
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }
+
+# Optimised for a small, self-contained background binary (see notes/02-design-spec.md).
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
