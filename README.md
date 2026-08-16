@@ -6,9 +6,9 @@ ThinkPad firmware forgets the keyboard backlight level across sleep and reboot, 
 comes back dark. This fixes that, and adds idle dimming, idle timeout, and separate
 profiles for AC and battery.
 
-**Status: the daemon works.** `tkbld` implements the full behaviour — light on input, dim
-and off on idle, AC/battery profiles, and re-applying the level after sleep. It currently
-runs in a console; the tray icon and settings window are the remaining work.
+**Status: usable.** `tkbl-tray` runs in the notification area and does the whole job —
+light on input, dim and off on idle, AC/battery profiles, and re-applying the level after
+sleep. Settings are still edited as JSON; a settings window is the remaining work.
 
 ## How it works
 
@@ -61,10 +61,32 @@ tkbl info             # driver status + decoded MLCG bitfield
 tkbl test             # cycle off -> low -> high, then restore
 ```
 
-### The daemon
+### The application
 
 ```sh
-tkbld                 # run the automatic behaviour in the foreground
+tkbl-tray             # the real thing: runs in the notification area, no console
+```
+
+The icon shows the current level. Left-click toggles between off and the profile's active
+level. Right-click gives:
+
+```
+  On (high) / Dim (low) / Off      pick a level by hand
+  Profile: AC                      which profile is active
+  Pause automatic control
+  Settings…                        opens settings.json in your editor
+  Start with Windows
+  Exit                             restores the active level on the way out
+```
+
+Picking a level by hand, like pressing `Fn+Space`, pauses automatic control until the next
+wake — the program will not fight you for the backlight. Edits to `settings.json` are
+picked up within a few seconds, no restart needed.
+
+### The console daemon
+
+```sh
+tkbld                 # same behaviour, but logs what it is doing
 ```
 
 Reads `%LOCALAPPDATA%\ThinkpadKbdLight\settings.json`, falling back to built-in defaults
@@ -130,9 +152,9 @@ if backlight.is_supported() {
 - [x] **1** — HAL + CLI
 - [x] **2** — idle state machine, settings model, AC/battery profiles
 - [x] **3a** — daemon: idle detection, power/session/resume events
-- [ ] **3b** — tray icon and menu
-- [ ] **4** — settings window
-- [ ] **5** — autostart, single instance, restore-on-exit, failure surfacing
+- [x] **3b** — tray icon and menu, autostart, single instance, restore-on-exit
+- [ ] **4** — settings window (currently: edit `settings.json`)
+- [ ] **5** — first-run hint, richer failure surfacing
 
 ## Licence
 

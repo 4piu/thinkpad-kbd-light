@@ -1,24 +1,12 @@
-//! `tkbld` — the backlight daemon.
+//! `tkbld` — the daemon in a console.
 //!
-//! Milestone 3, part 1 from `notes/02-design-spec.md` §9: the behaviour, without the tray
-//! UI. Runs in a console so it can be watched while testing; the tray front end comes next.
+//! Same behaviour as the tray application, but it logs what it is doing, which makes it
+//! the better thing to run when diagnosing something.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use tkbl::backlight::BacklightController;
-use tkbl::platform::{self, EventPump, PlatformEvent};
-use tkbl::{Backlight, Engine, Settings};
-
-/// State-machine cadence. `GetLastInputInfo` is a cheap syscall, so this can be brisk.
-const TICK: Duration = Duration::from_millis(250);
-
-/// How often to read the hardware level to notice an Fn+Space override.
-///
-/// Deliberately slower than `TICK`. Reading the level is *not* free: `MLCG` traps into
-/// SMM just as a write does, and an SMI briefly stalls every core. Polling at `TICK`
-/// would mean four traps a second, forever, for a change the user makes a few times a
-/// day. One second still notices the override well within the firmware's own ~1s fade.
-const LEVEL_POLL: Duration = Duration::from_secs(1);
+use tkbl::daemon::{Daemon, TICK};
+use tkbl::{platform, Settings};
 
 fn main() -> std::process::ExitCode {
     match run() {
@@ -39,95 +27,31 @@ fn run() -> Result<(), String> {
         )
     })?;
 
-    let backlight = Backlight::open()
-        .map_err(|e| format!("cannot open the Lenovo PM driver (\\\\.\\IBMPMDRV): {e}"))?;
-    if !backlight.is_supported() {
-        return Err("this machine reports no keyboard backlight support".into());
-    }
+    let mut daemon = Daemon::new(settings).map_err(|e| e.to_string())?;
 
-    let pump = EventPump::new().map_err(|e| format!("cannot create event window: {e}"))?;
-
-    let source = platform::power_source();
-    let mut engine = Engine::new(settings, source, Instant::now());
     println!("tkbld running. settings: {}", path.display());
-    println!("power source: {source:?}");
-
-    // While the display is off we stop driving entirely: the user is not there, and a
-    // write would only wake the EC for nothing.
-    let mut display_off = false;
-    let mut last_level_poll = Instant::now();
-    let mut last_phase = None;
+    println!("power source: {:?}", daemon.engine().power_source());
 
     loop {
+        platform::pump_messages();
         let now = Instant::now();
+        let report = daemon.step(now);
 
-        for event in pump.drain() {
-            match event {
-                PlatformEvent::Resume => {
-                    // The firmware forgets the level across sleep, so this must assert
-                    // rather than reconcile: drop both caches and re-apply unconditionally.
-                    display_off = false;
-                    engine.on_resume(now);
-                    backlight.invalidate_cache();
-                    println!("[event] resume / display on -> re-applying");
-                }
-                PlatformEvent::DisplayOff => {
-                    display_off = true;
-                    println!("[event] display off");
-                }
-                PlatformEvent::PowerSourceChanged(src) => {
-                    engine.set_power_source(src);
-                    println!("[event] power source -> {src:?}");
-                }
-                PlatformEvent::SessionLock => {
-                    engine.set_locked(true, now);
-                    println!("[event] session locked");
-                }
-                PlatformEvent::SessionUnlock => {
-                    engine.set_locked(false, now);
-                    engine.on_resume(now);
-                    backlight.invalidate_cache();
-                    println!("[event] session unlocked -> re-applying");
-                }
-            }
+        if report.power_source_changed {
+            println!(
+                "[event] power source -> {:?}",
+                daemon.engine().power_source()
+            );
         }
-
-        if display_off {
-            std::thread::sleep(TICK);
-            continue;
+        if report.override_detected {
+            println!("[override] level changed externally - backing off");
         }
-
-        // The OS is the authority on idle time, so sync the engine to it every tick
-        // rather than tracking input ourselves.
-        let idle = platform::idle_duration();
-        engine.on_input(now.checked_sub(idle).unwrap_or(now));
-
-        // Notice Fn+Space, which is handled in firmware and cannot be intercepted.
-        if now.duration_since(last_level_poll) >= LEVEL_POLL {
-            last_level_poll = now;
-            if let Ok(observed) = backlight.get_level() {
-                let was_suspended = engine.is_suspended();
-                engine.on_observed_level(observed);
-                if engine.is_suspended() && !was_suspended {
-                    println!(
-                        "[override] level changed externally to {} - backing off",
-                        observed.as_str()
-                    );
-                }
-            }
-        }
-
-        if let Some(desired) = engine.tick(now) {
-            match backlight.set_level(desired) {
-                Ok(()) => engine.note_applied(desired),
-                Err(e) => eprintln!("[warn] could not set level: {e}"),
-            }
-        }
-
-        let phase = engine.phase();
-        if last_phase != Some(phase) {
-            println!("[phase] {phase:?}");
-            last_phase = Some(phase);
+        if report.phase_changed {
+            println!(
+                "[phase] {:?} ({})",
+                daemon.phase(),
+                daemon.level().map(|l| l.as_str()).unwrap_or("?")
+            );
         }
 
         std::thread::sleep(TICK);

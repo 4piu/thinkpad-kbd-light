@@ -21,10 +21,13 @@
 #![cfg(windows)]
 
 pub mod acpi;
+pub mod autostart;
 pub mod backlight;
+pub mod daemon;
 pub mod engine;
 pub mod platform;
 pub mod settings;
+pub mod tray;
 
 pub use acpi::AcpiGateway;
 pub use backlight::{Backlight, BacklightController, FakeBacklight, Level};

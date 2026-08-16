@@ -210,17 +210,27 @@ impl EventPump {
         Ok(Self { hwnd })
     }
 
-    /// Pump pending messages and return whatever the window procedure collected.
-    pub fn drain(&self) -> Vec<PlatformEvent> {
-        // SAFETY: standard non-blocking message pump on the owning thread.
-        unsafe {
-            let mut msg: MSG = std::mem::zeroed();
-            while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
-                TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        }
+    /// Take whatever the window procedure collected.
+    ///
+    /// Call [`pump_messages`] first — this only drains the queue, it does not pump.
+    pub fn take_events(&self) -> Vec<PlatformEvent> {
         PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()))
+    }
+}
+
+/// Dispatch all pending messages for this thread.
+///
+/// One call services every window owned by the thread, so the event window and the tray
+/// window are both driven by this. Call it once per iteration, before draining any
+/// window's event queue.
+pub fn pump_messages() {
+    // SAFETY: standard non-blocking message pump on the owning thread.
+    unsafe {
+        let mut msg: MSG = std::mem::zeroed();
+        while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
 }
 

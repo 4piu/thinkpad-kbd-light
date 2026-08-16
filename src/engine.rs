@@ -111,6 +111,14 @@ impl Engine {
         }
     }
 
+    /// Stop driving because the user chose a level by hand.
+    ///
+    /// Same state as an Fn+Space override, and cleared the same way: on the next resume,
+    /// or when the user explicitly hands control back.
+    pub fn pause(&mut self) {
+        self.suspended = true;
+    }
+
     /// Give up a manual override on the user's say-so (tray menu).
     pub fn resume_control(&mut self) {
         self.suspended = false;
