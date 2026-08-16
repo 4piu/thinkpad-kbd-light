@@ -10,12 +10,10 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
 use windows_sys::Win32::System::Threading::CreateMutexW;
-use windows_sys::Win32::UI::Shell::ShellExecuteW;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    MessageBoxW, MB_ICONERROR, MB_OK, SW_SHOWNORMAL,
-};
+use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
 
 use tkbl::daemon::{Daemon, TICK};
+use tkbl::settings_window::{self, Outcome};
 use tkbl::tray::{
     Tray, TrayEvent, ID_AUTO, ID_DIM, ID_EXIT, ID_OFF, ID_ON, ID_SETTINGS, ID_STARTUP,
 };
@@ -65,24 +63,6 @@ fn settings_mtime(path: &PathBuf) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
 }
 
-fn open_settings_file(path: &PathBuf, settings: &Settings) {
-    // Make sure there is something to open before handing it to the editor.
-    if !path.exists() {
-        let _ = settings.save(path);
-    }
-    // SAFETY: strings are NUL-terminated and outlive the call.
-    unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            wide("open").as_ptr(),
-            wide(&path.to_string_lossy()).as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            SW_SHOWNORMAL,
-        );
-    }
-}
-
 fn tooltip(daemon: &Daemon) -> String {
     let level = daemon.level().map(|l| l.as_str()).unwrap_or("unknown");
     let source = match daemon.engine().power_source() {
@@ -103,6 +83,8 @@ fn main() {
     if !claim_single_instance() {
         return; // already running; nothing to say
     }
+    // Before any window exists, or the settings window renders blurry on a HiDPI panel.
+    platform::set_dpi_aware();
 
     let path = match Settings::default_path() {
         Ok(p) => p,
@@ -166,7 +148,9 @@ fn main() {
                             daemon.set_level_manual(daemon.level().unwrap_or(Level::High));
                         }
                     }
-                    ID_SETTINGS => open_settings_file(&path, &settings),
+                    ID_SETTINGS => {
+                        let _ = settings_window::open(&settings);
+                    }
                     ID_STARTUP => {
                         startup_on = !startup_on;
                         if autostart::set(startup_on).is_err() {
@@ -181,6 +165,19 @@ fn main() {
 
         if quit {
             break;
+        }
+
+        if let Some(Outcome::Saved(fresh)) = settings_window::take_outcome() {
+            // The window does not own this checkbox; the tray menu does.
+            let mut fresh = *fresh;
+            fresh.start_with_windows = startup_on;
+            if fresh.save(&path).is_ok() {
+                last_mtime = settings_mtime(&path);
+            }
+            settings = fresh.clone();
+            daemon.replace_settings(fresh);
+            // New timeouts should take effect now, not after the next override.
+            daemon.resume_auto();
         }
 
         // Pick up hand edits to settings.json without needing a restart.

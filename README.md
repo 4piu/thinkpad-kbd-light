@@ -6,9 +6,9 @@ ThinkPad firmware forgets the keyboard backlight level across sleep and reboot, 
 comes back dark. This fixes that, and adds idle dimming, idle timeout, and separate
 profiles for AC and battery.
 
-**Status: usable.** `tkbl-tray` runs in the notification area and does the whole job —
-light on input, dim and off on idle, AC/battery profiles, and re-applying the level after
-sleep. Settings are still edited as JSON; a settings window is the remaining work.
+**Status: feature complete.** `tkbl-tray` runs in the notification area and does the whole
+job — light on input, dim and off on idle, AC/battery profiles, re-applying the level after
+sleep, and a settings window.
 
 ## How it works
 
@@ -74,14 +74,36 @@ level. Right-click gives:
   On (high) / Dim (low) / Off      pick a level by hand
   Profile: AC                      which profile is active
   Pause automatic control
-  Settings…                        opens settings.json in your editor
+  Settings…                        the settings window
   Start with Windows
   Exit                             restores the active level on the way out
 ```
 
 Picking a level by hand, like pressing `Fn+Space`, pauses automatic control until the next
-wake — the program will not fight you for the backlight. Edits to `settings.json` are
-picked up within a few seconds, no restart needed.
+wake — the program will not fight you for the backlight.
+
+### Settings
+
+Both profiles are shown side by side, because the asymmetry between them is the point:
+
+```
+Profile           AC power        Battery
+Enabled              [x]            [x]
+Active level      [High  v]      [Low   v]
+Dim to            [Low   v]      [Off   v]
+Dim after (s)     [x] 30         [ ] 30
+Off after (s)     [x] 300        [x] 60
+
+[x] Turn the backlight off while locked
+[x] Restore the light when exiting
+```
+
+Each timeout has its own tick box, so either can be switched off. Some combinations are
+inert rather than rejected — with an active level of `Low` there is no room to dim first,
+so only the off timer applies; with `Off`, neither does.
+
+Settings live in `%LOCALAPPDATA%\ThinkpadKbdLight\settings.json`. Hand edits are picked up
+within a few seconds, no restart needed.
 
 ### The console daemon
 
@@ -153,7 +175,7 @@ if backlight.is_supported() {
 - [x] **2** — idle state machine, settings model, AC/battery profiles
 - [x] **3a** — daemon: idle detection, power/session/resume events
 - [x] **3b** — tray icon and menu, autostart, single instance, restore-on-exit
-- [ ] **4** — settings window (currently: edit `settings.json`)
+- [x] **4** — settings window
 - [ ] **5** — first-run hint, richer failure surfacing
 
 ## Licence

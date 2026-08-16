@@ -16,6 +16,9 @@ use windows_sys::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
 use windows_sys::Win32::System::SystemInformation::GetTickCount;
+use windows_sys::Win32::UI::HiDpi::{
+    SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_SYSTEM_AWARE,
+};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
@@ -215,6 +218,20 @@ impl EventPump {
     /// Call [`pump_messages`] first — this only drains the queue, it does not pump.
     pub fn take_events(&self) -> Vec<PlatformEvent> {
         PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()))
+    }
+}
+
+/// Opt in to system-DPI scaling before any window exists.
+///
+/// Without this, Windows bitmap-stretches our windows on a HiDPI panel and the settings
+/// text comes out blurry. System-aware (rather than per-monitor) keeps the layout code
+/// to a single scale factor, which is the right trade for one small fixed dialog.
+///
+/// Must be called before the first window is created; failure is not actionable.
+pub fn set_dpi_aware() {
+    // SAFETY: no preconditions; returns false on older Windows, which we ignore.
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
     }
 }
 

@@ -27,6 +27,7 @@ pub mod daemon;
 pub mod engine;
 pub mod platform;
 pub mod settings;
+pub mod settings_window;
 pub mod tray;
 
 pub use acpi::AcpiGateway;
