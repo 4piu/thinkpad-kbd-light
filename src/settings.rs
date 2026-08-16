@@ -158,7 +158,11 @@ impl Settings {
 
     pub fn load(path: &PathBuf) -> io::Result<Self> {
         let text = fs::read_to_string(path)?;
-        serde_json::from_str(&text)
+        // Tolerate a UTF-8 BOM. Notepad and PowerShell's `-Encoding utf8` both write one,
+        // and serde_json treats it as a syntax error — so without this, hand-editing the
+        // config on Windows can leave the app refusing to start.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        serde_json::from_str(text)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
     }
 
@@ -284,6 +288,16 @@ mod tests {
         s.save(&path).unwrap();
         let back = Settings::load(&path).unwrap();
         assert_eq!(s, back);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_utf8_bom_does_not_break_loading() {
+        // Notepad and PowerShell's -Encoding utf8 both emit one.
+        let path = std::env::temp_dir().join(format!("tkbl-bom-{}.json", std::process::id()));
+        let json = serde_json::to_string_pretty(&Settings::default()).unwrap();
+        std::fs::write(&path, format!("\u{feff}{json}")).unwrap();
+        assert_eq!(Settings::load(&path).unwrap(), Settings::default());
         let _ = std::fs::remove_file(&path);
     }
 

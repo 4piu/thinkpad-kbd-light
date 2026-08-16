@@ -23,6 +23,7 @@
 pub mod acpi;
 pub mod backlight;
 pub mod engine;
+pub mod platform;
 pub mod settings;
 
 pub use acpi::AcpiGateway;

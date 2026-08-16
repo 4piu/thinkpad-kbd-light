@@ -6,9 +6,9 @@ ThinkPad firmware forgets the keyboard backlight level across sleep and reboot, 
 comes back dark. This fixes that, and adds idle dimming, idle timeout, and separate
 profiles for AC and battery.
 
-**Status: milestone 2 — hardware layer and core logic done.** The `tkbl` CLI can read and
-set the backlight, and the idle state machine and settings model are implemented and
-tested. The tray application is not built yet.
+**Status: the daemon works.** `tkbld` implements the full behaviour — light on input, dim
+and off on idle, AC/battery profiles, and re-applying the level after sleep. It currently
+runs in a console; the tray icon and settings window are the remaining work.
 
 ## How it works
 
@@ -61,6 +61,24 @@ tkbl info             # driver status + decoded MLCG bitfield
 tkbl test             # cycle off -> low -> high, then restore
 ```
 
+### The daemon
+
+```sh
+tkbld                 # run the automatic behaviour in the foreground
+```
+
+Reads `%LOCALAPPDATA%\ThinkpadKbdLight\settings.json`, falling back to built-in defaults
+when it does not exist. Logs each phase change so you can watch what it is doing:
+
+```
+tkbld running. settings: C:\Users\foo\AppData\Local\ThinkpadKbdLight\settings.json
+power source: Ac
+[phase] Active
+[phase] Dim
+[phase] Off
+[phase] Active
+```
+
 ```
 $ tkbl info
 device      : \\.\IBMPMDRV (opened, no elevation)
@@ -111,9 +129,10 @@ if backlight.is_supported() {
 
 - [x] **1** — HAL + CLI
 - [x] **2** — idle state machine, settings model, AC/battery profiles
-- [ ] **3** — tray app: idle detection, power/session events
+- [x] **3a** — daemon: idle detection, power/session/resume events
+- [ ] **3b** — tray icon and menu
 - [ ] **4** — settings window
-- [ ] **5** — autostart, single instance, failure surfacing
+- [ ] **5** — autostart, single instance, restore-on-exit, failure surfacing
 
 ## Licence
 
