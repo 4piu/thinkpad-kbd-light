@@ -3,6 +3,10 @@
 //! Controls are created in code rather than from a dialog resource, keeping the build to
 //! plain `cargo build`. Laying the two profiles out side by side is deliberate — the
 //! asymmetry between them is the whole point, and a dropdown would hide it.
+//!
+//! There is no "dim to" setting: with three levels, the only target not already
+//! expressible through the two timers is the level below Active, so dimming always drops
+//! one step. Controls that cannot apply are greyed out rather than silently ignored.
 
 use std::cell::RefCell;
 use std::io;
@@ -11,6 +15,7 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{CreateFontW, DeleteObject, FW_NORMAL, FW_SEMIBOLD, HFONT};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::GetDpiForSystem;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, GetSystemMetrics,
     GetWindowTextW, MessageBoxW, PostMessageW, RegisterClassExW, SendMessageW, SetForegroundWindow,
@@ -54,7 +59,6 @@ pub enum Outcome {
 struct ProfileControls {
     enabled: HWND,
     active: HWND,
-    dim_level: HWND,
     dim_on: HWND,
     dim_secs: HWND,
     off_on: HWND,
@@ -207,18 +211,16 @@ fn build_profile_column(b: &Builder, x: i32, p: &Profile) -> ProfileControls {
     let c = ProfileControls {
         enabled: b.checkbox("", x, 52, 24),
         active: b.combo(x, 80, 90, &levels),
-        dim_level: b.combo(x, 110, 90, &levels),
-        dim_on: b.checkbox("", x, 142, 24),
-        dim_secs: b.edit(x + 26, 140, 62),
-        off_on: b.checkbox("", x, 172, 24),
-        off_secs: b.edit(x + 26, 170, 62),
+        dim_on: b.checkbox("", x, 112, 24),
+        dim_secs: b.edit(x + 26, 110, 62),
+        off_on: b.checkbox("", x, 142, 24),
+        off_secs: b.edit(x + 26, 140, 62),
     };
 
     set_checked(c.enabled, p.enabled);
-    // SAFETY: combo handles are ours.
+    // SAFETY: combo handle is ours.
     unsafe {
         SendMessageW(c.active, CB_SETCURSEL, p.active_level as usize, 0);
-        SendMessageW(c.dim_level, CB_SETCURSEL, p.dim_level as usize, 0);
     }
     set_checked(c.dim_on, p.dim_after_secs.is_some());
     set_checked(c.off_on, p.off_after_secs.is_some());
@@ -236,11 +238,41 @@ fn build_profile_column(b: &Builder, x: i32, p: &Profile) -> ProfileControls {
     c
 }
 
+/// Grey out anything that cannot apply, so an inert setting is visible rather than
+/// silently ignored by the engine.
+fn refresh_enabled() {
+    CONTROLS.with(|c| {
+        if let Some(c) = c.borrow().as_ref() {
+            refresh_column(&c.ac);
+            refresh_column(&c.battery);
+        }
+    });
+}
+
+fn refresh_column(c: &ProfileControls) {
+    let on = checked(c.enabled);
+    let active = level_from_index(combo_index(c.active));
+    // Dimming needs a level below the active one to drop to, which only High has.
+    let can_dim = on && active == Level::High;
+    // Turning off only means anything if the light is on to begin with.
+    let can_off = on && active != Level::Off;
+
+    enable(c.active, on);
+    enable(c.dim_on, can_dim);
+    enable(c.dim_secs, can_dim && checked(c.dim_on));
+    enable(c.off_on, can_off);
+    enable(c.off_secs, can_off && checked(c.off_on));
+}
+
+fn enable(hwnd: HWND, on: bool) {
+    // SAFETY: hwnd is a control we created.
+    unsafe { EnableWindow(hwnd, i32::from(on)) };
+}
+
 fn read_profile(c: &ProfileControls) -> Profile {
     Profile {
         enabled: checked(c.enabled),
         active_level: level_from_index(combo_index(c.active)),
-        dim_level: level_from_index(combo_index(c.dim_level)),
         dim_after_secs: if checked(c.dim_on) {
             Some(read_u32(c.dim_secs).unwrap_or(30))
         } else {
@@ -269,6 +301,10 @@ fn warn(hwnd: HWND, text: &str) {
 unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_COMMAND => {
+            // BN_CLICKED (0) and CBN_SELCHANGE (1) can both change what is applicable.
+            if ((wp >> 16) & 0xffff) <= 1 {
+                refresh_enabled();
+            }
             match (wp & 0xffff) as u32 {
                 ID_SAVE => {
                     let built = CONTROLS.with(|c| {
@@ -348,7 +384,7 @@ pub fn open(settings: &Settings) -> io::Result<()> {
     OUTCOME.with(|o| *o.borrow_mut() = None);
 
     let class_name = wide("TkblSettingsWindow");
-    let (w, h) = (470, 350);
+    let (w, h) = (470, 320);
 
     // SAFETY: standard window creation; all strings outlive the calls.
     let hwnd = unsafe {
@@ -468,9 +504,8 @@ pub fn open(settings: &Settings) -> io::Result<()> {
 
     b.label("Enabled", 20, 54, 150);
     b.label("Active level", 20, 84, 150);
-    b.label("Dim to", 20, 114, 150);
-    b.label("Dim after (s)", 20, 144, 150);
-    b.label("Off after (s)", 20, 174, 150);
+    b.label("Dim after (s)", 20, 114, 150);
+    b.label("Off after (s)", 20, 144, 150);
 
     let ac = build_profile_column(&b, col_ac, &settings.ac);
     let battery = build_profile_column(&b, col_bat, &settings.battery);
@@ -481,27 +516,27 @@ pub fn open(settings: &Settings) -> io::Result<()> {
         BS_GROUPBOX,
         R {
             x: 16,
-            y: 206,
+            y: 176,
             w: 434,
             h: 74,
         },
         0,
     );
-    let turn_off_when_locked = b.checkbox("Turn the backlight off while locked", 30, 222, 300);
-    let restore_on_exit = b.checkbox("Restore the light when exiting", 30, 248, 300);
+    let turn_off_when_locked = b.checkbox("Turn the backlight off while locked", 30, 192, 300);
+    let restore_on_exit = b.checkbox("Restore the light when exiting", 30, 218, 300);
     set_checked(turn_off_when_locked, settings.turn_off_when_locked);
     set_checked(restore_on_exit, settings.restore_on_exit);
 
     b.label(
-        "The hardware has three levels; \"dim\" is the low one.",
+        "Three hardware levels; dimming drops to the one below Active.",
         20,
-        290,
+        260,
         420,
     );
 
     let button = |x| R {
         x,
-        y: 310,
+        y: 280,
         w: 85,
         h: 26,
     };
@@ -524,6 +559,7 @@ pub fn open(settings: &Settings) -> io::Result<()> {
         })
     });
     OPEN.with(|o| *o.borrow_mut() = true);
+    refresh_enabled();
 
     // SAFETY: showing the window we just created.
     unsafe {

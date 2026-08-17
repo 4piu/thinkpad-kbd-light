@@ -90,17 +90,21 @@ Both profiles are shown side by side, because the asymmetry between them is the 
 Profile           AC power        Battery
 Enabled              [x]            [x]
 Active level      [High  v]      [Low   v]
-Dim to            [Low   v]      [Off   v]
-Dim after (s)     [x] 30         [ ] 30
+Dim after (s)     [x] 30         [ ] 30      <- greyed: nothing to dim to
 Off after (s)     [x] 300        [x] 60
 
 [x] Turn the backlight off while locked
 [x] Restore the light when exiting
 ```
 
-Each timeout has its own tick box, so either can be switched off. Some combinations are
-inert rather than rejected — with an active level of `Low` there is no room to dim first,
-so only the off timer applies; with `Off`, neither does.
+Each timeout has its own tick box, so either can be switched off independently.
+
+There is no "dim to" setting. With three levels, the only target that is not already
+expressible through the two timers is the level below Active — anything else just turns
+the dim timer into a second off timer — so dimming always drops one step.
+
+Controls that cannot apply are greyed out rather than silently ignored: an active level of
+`Low` leaves no room to dim first, so only the off timer applies; `Off` disables both.
 
 Settings live in `%LOCALAPPDATA%\ThinkpadKbdLight\settings.json`. Hand edits are picked up
 within a few seconds, no restart needed.

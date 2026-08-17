@@ -34,7 +34,6 @@ pub enum PowerSource {
 pub struct Profile {
     pub enabled: bool,
     pub active_level: Level,
-    pub dim_level: Level,
     /// Seconds of idle before dimming. `None` = never dim.
     pub dim_after_secs: Option<u32>,
     /// Seconds of idle before turning off. `None` = never turn off.
@@ -45,9 +44,6 @@ impl Profile {
     /// How long to wait before dimming, or `None` if dimming cannot apply.
     pub fn effective_dim_after(&self) -> Option<Duration> {
         if !self.enabled || self.active_level <= Level::Low {
-            return None;
-        }
-        if self.dim_level >= self.active_level {
             return None;
         }
         self.dim_after_secs.map(|s| Duration::from_secs(s as u64))
@@ -61,24 +57,21 @@ impl Profile {
         self.off_after_secs.map(|s| Duration::from_secs(s as u64))
     }
 
-    /// The level to use for the dim step, clamped below the active level.
+    /// The level the dim step drops to: always one below the active level.
+    ///
+    /// There is no separate setting for this. With three levels, the only choice that is
+    /// not already expressible through the two timers is "the level below active" — any
+    /// other target simply turns the dim timer into a second off timer. See the note in
+    /// `notes/02-design-spec.md` §4.
     pub fn effective_dim_level(&self) -> Level {
-        if self.dim_level < self.active_level {
-            self.dim_level
-        } else {
-            Level::Off
+        match self.active_level {
+            Level::High => Level::Low,
+            _ => Level::Off,
         }
     }
 
     /// Human-readable problems, for the settings UI to surface.
     pub fn validate(&self) -> Result<(), String> {
-        if self.dim_level >= self.active_level && self.dim_after_secs.is_some() {
-            return Err(format!(
-                "dim level ({}) must be below the active level ({})",
-                self.dim_level.as_str(),
-                self.active_level.as_str()
-            ));
-        }
         if let (Some(dim), Some(off)) = (self.dim_after_secs, self.off_after_secs) {
             if dim >= off {
                 return Err(format!(
@@ -113,7 +106,6 @@ impl Default for Settings {
             ac: Profile {
                 enabled: true,
                 active_level: Level::High,
-                dim_level: Level::Low,
                 dim_after_secs: Some(30),
                 off_after_secs: Some(300),
             },
@@ -121,7 +113,6 @@ impl Default for Settings {
             battery: Profile {
                 enabled: true,
                 active_level: Level::Low,
-                dim_level: Level::Off,
                 dim_after_secs: None,
                 off_after_secs: Some(60),
             },
@@ -211,7 +202,6 @@ mod tests {
         let p = Profile {
             enabled: true,
             active_level: Level::Low,
-            dim_level: Level::Off,
             dim_after_secs: Some(10),
             off_after_secs: Some(60),
         };
@@ -224,12 +214,20 @@ mod tests {
         let p = Profile {
             enabled: true,
             active_level: Level::Off,
-            dim_level: Level::Off,
             dim_after_secs: Some(10),
             off_after_secs: Some(60),
         };
         assert_eq!(p.effective_dim_after(), None);
         assert_eq!(p.effective_off_after(), None);
+    }
+
+    #[test]
+    fn dim_target_is_always_one_below_active() {
+        let mut p = Settings::default().ac;
+        p.active_level = Level::High;
+        assert_eq!(p.effective_dim_level(), Level::Low);
+        p.active_level = Level::Low;
+        assert_eq!(p.effective_dim_level(), Level::Off);
     }
 
     #[test]
@@ -262,14 +260,6 @@ mod tests {
     }
 
     #[test]
-    fn dim_level_must_be_below_active() {
-        let mut p = Settings::default().ac;
-        p.dim_level = Level::High;
-        assert!(p.validate().is_err());
-        assert_eq!(p.effective_dim_level(), Level::Off);
-    }
-
-    #[test]
     fn json_roundtrips() {
         let s = Settings::default();
         let text = serde_json::to_string_pretty(&s).unwrap();
@@ -288,6 +278,28 @@ mod tests {
         s.save(&path).unwrap();
         let back = Settings::load(&path).unwrap();
         assert_eq!(s, back);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn version_1_files_with_the_removed_dim_level_still_load() {
+        // `dim_level` was dropped when it turned out to be redundant. Files written by
+        // earlier builds must keep working rather than dumping the user's configuration.
+        let path = std::env::temp_dir().join(format!("tkbl-v1-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            br#"{"version":1,
+                 "ac":{"enabled":true,"active_level":"high","dim_level":"low",
+                       "dim_after_secs":30,"off_after_secs":300},
+                 "battery":{"enabled":true,"active_level":"low","dim_level":"off",
+                            "dim_after_secs":null,"off_after_secs":60},
+                 "turn_off_when_locked":true,"restore_on_exit":true,
+                 "start_with_windows":false}"#,
+        )
+        .unwrap();
+
+        let loaded = Settings::load(&path).expect("v1 file should still load");
+        assert_eq!(loaded, Settings::default());
         let _ = std::fs::remove_file(&path);
     }
 

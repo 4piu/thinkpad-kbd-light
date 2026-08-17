@@ -369,7 +369,6 @@ mod tests {
             ac: Profile {
                 enabled: true,
                 active_level: Level::Low,
-                dim_level: Level::Off,
                 dim_after_secs: Some(10),
                 off_after_secs: Some(60),
             },
