@@ -86,7 +86,10 @@ impl Profile {
 /// The whole configuration file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
-    /// Schema version, present from day one so migrations are possible later.
+    /// Written but not yet read. Kept only because it is the one thing that genuinely
+    /// cannot be added retroactively: without it, a future version has no way to tell an
+    /// old file from a new one. No compatibility is promised until there is a release —
+    /// if the schema changes, delete the file.
     pub version: u32,
     pub ac: Profile,
     pub battery: Profile,
@@ -278,28 +281,6 @@ mod tests {
         s.save(&path).unwrap();
         let back = Settings::load(&path).unwrap();
         assert_eq!(s, back);
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn version_1_files_with_the_removed_dim_level_still_load() {
-        // `dim_level` was dropped when it turned out to be redundant. Files written by
-        // earlier builds must keep working rather than dumping the user's configuration.
-        let path = std::env::temp_dir().join(format!("tkbl-v1-{}.json", std::process::id()));
-        std::fs::write(
-            &path,
-            br#"{"version":1,
-                 "ac":{"enabled":true,"active_level":"high","dim_level":"low",
-                       "dim_after_secs":30,"off_after_secs":300},
-                 "battery":{"enabled":true,"active_level":"low","dim_level":"off",
-                            "dim_after_secs":null,"off_after_secs":60},
-                 "turn_off_when_locked":true,"restore_on_exit":true,
-                 "start_with_windows":false}"#,
-        )
-        .unwrap();
-
-        let loaded = Settings::load(&path).expect("v1 file should still load");
-        assert_eq!(loaded, Settings::default());
         let _ = std::fs::remove_file(&path);
     }
 
