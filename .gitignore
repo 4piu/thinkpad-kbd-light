@@ -9,3 +9,4 @@ scratch/
 # icon working files (tkbl.ico is committed; previews are regenerated)
 /assets/icon-sizes.png
 __pycache__/
+/dist/
