@@ -55,11 +55,15 @@ state-machine tick and the once-a-second hardware poll both running:
 
 | | |
 |---|---|
-| CPU | **0.36 %** of one core (0.045 % of the 8-core machine) |
-| Working set | **10.4 MB** |
-| Private bytes | **1.6 MB** |
-| Threads | 3 |
-| `tkbl-tray.exe` | 257 KB, no runtime dependencies |
+| CPU | **0.31 %** of one core (0.039 % of the 8-core machine) |
+| Working set | **10.5 MB** |
+| Private bytes | **1.5 MB** |
+| `tkbl-tray.exe` | 354 KB |
+
+The C runtime is linked statically, so the binaries import nothing but Windows' own DLLs
+(`kernel32`, `user32`, `gdi32`, `shell32`, `advapi32`, `wtsapi32`, `ntdll`). No Visual C++
+Redistributable, no .NET, no installer. Each executable is independent — the tray does not
+need the CLI present.
 
 The once-a-second `MLCG` poll traps into SMM; measured at **1.75 ms median** per call, so
 about 0.2 % of a core, and most of what is left.

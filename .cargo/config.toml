@@ -1,0 +1,5 @@
+[target.x86_64-pc-windows-msvc]
+# Link the CRT statically so the binaries need nothing but Windows itself.
+# Without this they import VCRUNTIME140.dll, which is part of the Visual C++
+# Redistributable rather than the OS, and is not present on a clean install.
+rustflags = ["-C", "target-feature=+crt-static"]
