@@ -150,9 +150,21 @@ whether to notify — and the values under `Software\Lenovo\OnScreenDisplay` are
 preferences.
 
 So the popup is hidden instead, and only the one our own write caused: the visible windows
-of `tposd` are noted immediately before writing, and anything that appears just after is
-hidden. `Fn+Space` keeps its popup, because for that we never write. Switch it off with
-"Hide Lenovo's popup for automatic changes" if you would rather see them.
+of `tposd` are noted immediately before writing, and a short-lived thread then hides
+anything that appears over the next 700 ms. `Fn+Space` keeps its popup, because for that we
+never write. Switch it off with "Hide Lenovo's popup for automatic changes" if you would
+rather see them.
+
+Measured on the X1C6, sampling as fast as the machine allows:
+
+```
+suppression off    OSD visible 3017 ms
+suppression on     OSD visible    6 ms, 9 ms
+```
+
+Under one frame at 60 Hz. Note this is narrower than it sounds: `tposd` is not what draws
+the volume popup (Windows does that), so only the ThinkPad hardware indicators are ever
+touched, and only inside the 700 ms after one of our writes.
 
 ## The hardware has three states
 
