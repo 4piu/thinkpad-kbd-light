@@ -95,6 +95,7 @@ Off after (s)     [x] 300        [x] 60
 
 [x] Turn the backlight off while locked
 [x] Restore the light when exiting
+[x] Hide Lenovo's popup for automatic changes
 ```
 
 Each timeout has its own tick box, so either can be switched off independently.
@@ -138,6 +139,21 @@ raw MLCG    : 0x00050202
   bit 9     : 1 (supported)
 ```
 
+## Lenovo's on-screen popup
+
+`tposd.exe` shows a popup every time the backlight level changes, which is useful when you
+press `Fn+Space` and irritating when the program dims the keyboard on a timer.
+
+There is no supported way to switch it off. The `MLCS` ACPI method raises a notification on
+both of its branches — the `0x00010000` argument bit chooses between `MHKQ` and `MHKK`, not
+whether to notify — and the values under `Software\Lenovo\OnScreenDisplay` are state, not
+preferences.
+
+So the popup is hidden instead, and only the one our own write caused: the visible windows
+of `tposd` are noted immediately before writing, and anything that appears just after is
+hidden. `Fn+Space` keeps its popup, because for that we never write. Switch it off with
+"Hide Lenovo's popup for automatic changes" if you would rather see them.
+
 ## The hardware has three states
 
 `off`, `low`, `high`. There is no percentage — "dim" is literally the `low` state, so the
@@ -180,7 +196,7 @@ if backlight.is_supported() {
 - [x] **3a** — daemon: idle detection, power/session/resume events
 - [x] **3b** — tray icon and menu, autostart, single instance, restore-on-exit
 - [x] **4** — settings window
-- [ ] **5** — first-run hint, richer failure surfacing
+- [x] **5** — first-run hint, OSD suppression, driver-failure surfacing
 
 ## Licence
 

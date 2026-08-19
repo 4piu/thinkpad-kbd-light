@@ -64,6 +64,9 @@ fn settings_mtime(path: &PathBuf) -> Option<std::time::SystemTime> {
 }
 
 fn tooltip(daemon: &Daemon) -> String {
+    if daemon.is_degraded() {
+        return "Keyboard backlight: driver not responding".to_string();
+    }
     let level = daemon.level().map(|l| l.as_str()).unwrap_or("unknown");
     let source = match daemon.engine().power_source() {
         PowerSource::Ac => "AC",
@@ -79,6 +82,15 @@ fn tooltip(daemon: &Daemon) -> String {
     }
 }
 
+/// The level to draw in the tray, or `None` when we cannot vouch for it.
+fn icon_level(daemon: &Daemon) -> Option<Level> {
+    if daemon.is_degraded() {
+        None
+    } else {
+        daemon.level()
+    }
+}
+
 fn main() {
     if !claim_single_instance() {
         return; // already running; nothing to say
@@ -90,6 +102,8 @@ fn main() {
         Ok(p) => p,
         Err(e) => fatal(&format!("Cannot locate the settings folder:\n{e}")),
     };
+    // Absence of the file is what "first run" means; remember it before we write one.
+    let first_run = !path.exists();
     let settings = match Settings::load_or_default(&path) {
         Ok(s) => s,
         Err(e) => fatal(&format!(
@@ -116,6 +130,17 @@ fn main() {
     let mut last_mtime = settings_mtime(&path);
     let mut startup_on = autostart::is_enabled();
     let mut first = true;
+
+    if first_run {
+        // Write the defaults so there is something to edit, and explain the one thing
+        // people get wrong about tray apps: closing the window does not quit them.
+        let _ = settings.save(&path);
+        last_mtime = settings_mtime(&path);
+        tray.balloon(
+            "ThinkPad Keyboard Backlight",
+            "Running in the notification area. Right-click the icon for settings, or to quit.",
+        );
+    }
 
     loop {
         platform::pump_messages();
@@ -200,7 +225,7 @@ fn main() {
             startup_on,
         );
         if report.any() || first {
-            tray.update(daemon.level(), &tooltip(&daemon), first);
+            tray.update(icon_level(&daemon), &tooltip(&daemon), first);
             first = false;
         }
 

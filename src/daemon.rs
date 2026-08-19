@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::backlight::BacklightController;
 use crate::engine::Phase;
+use crate::osd::OsdSuppressor;
 use crate::platform::{self, EventPump, PlatformEvent};
 use crate::{Backlight, Engine, Level, Settings};
 
@@ -22,6 +23,13 @@ pub const TICK: Duration = Duration::from_millis(250);
 /// still notices it well inside the firmware's own ~1s fade.
 pub const LEVEL_POLL: Duration = Duration::from_secs(1);
 
+/// Consecutive driver errors before we call the backlight unavailable and say so.
+const DEGRADE_AFTER: u32 = 5;
+
+/// Upper bound on how long a write waits around to hide the OSD popup it caused.
+const OSD_BURST: Duration = Duration::from_millis(400);
+const OSD_BURST_STEP: Duration = Duration::from_millis(20);
+
 /// What changed during a [`Daemon::step`], for the front end to reflect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StepReport {
@@ -29,6 +37,7 @@ pub struct StepReport {
     pub level_changed: bool,
     pub override_detected: bool,
     pub power_source_changed: bool,
+    pub degraded_changed: bool,
 }
 
 impl StepReport {
@@ -37,6 +46,7 @@ impl StepReport {
             || self.level_changed
             || self.override_detected
             || self.power_source_changed
+            || self.degraded_changed
     }
 }
 
@@ -44,11 +54,15 @@ pub struct Daemon {
     engine: Engine,
     backlight: Backlight,
     pump: EventPump,
+    osd: OsdSuppressor,
     /// While the display is off the user is not there, so we stop driving entirely.
     display_off: bool,
     last_level_poll: Instant,
     last_phase: Option<Phase>,
     level: Option<Level>,
+    /// Consecutive driver errors; reset by any success.
+    failures: u32,
+    degraded: bool,
 }
 
 impl Daemon {
@@ -65,10 +79,13 @@ impl Daemon {
             engine: Engine::new(settings, platform::power_source(), now),
             backlight,
             pump,
+            osd: OsdSuppressor::new(),
             display_off: false,
             last_level_poll: now,
             last_phase: None,
             level: None,
+            failures: 0,
+            degraded: false,
         })
     }
 
@@ -85,14 +102,56 @@ impl Daemon {
         self.level
     }
 
+    /// True when the driver has failed repeatedly and we have stopped trusting it.
+    pub fn is_degraded(&self) -> bool {
+        self.degraded
+    }
+
     pub fn replace_settings(&mut self, settings: Settings) {
         self.engine.replace_settings(settings);
+    }
+
+    /// Write a level, hiding the OSD popup it causes and tracking driver health.
+    fn write_level(&mut self, level: Level, now: Instant) -> bool {
+        let suppress = self.engine.settings().suppress_osd;
+        if suppress {
+            // Snapshot before the write: anything appearing after it is ours to hide.
+            self.osd.arm(now);
+        }
+
+        match self.backlight.set_level(level) {
+            Ok(()) => {
+                self.failures = 0;
+                self.degraded = false;
+                if suppress {
+                    // The popup appears a few milliseconds later, so wait briefly rather
+                    // than leaving it on screen until the next tick. Bounded, and it exits
+                    // as soon as the popup has been hidden.
+                    let deadline = Instant::now() + OSD_BURST;
+                    while Instant::now() < deadline {
+                        if self.osd.poll(Instant::now()) {
+                            break;
+                        }
+                        std::thread::sleep(OSD_BURST_STEP);
+                    }
+                    self.osd.disarm();
+                }
+                true
+            }
+            Err(_) => {
+                self.osd.disarm();
+                self.failures += 1;
+                self.degraded = self.failures >= DEGRADE_AFTER;
+                false
+            }
+        }
     }
 
     /// One iteration. Callers pump the message queue first via
     /// [`crate::platform::pump_messages`].
     pub fn step(&mut self, now: Instant) -> StepReport {
         let mut report = StepReport::default();
+        let was_degraded = self.degraded;
 
         for event in self.pump.take_events() {
             match event {
@@ -103,6 +162,9 @@ impl Daemon {
                     self.display_off = false;
                     self.engine.on_resume(now);
                     self.backlight.invalidate_cache();
+                    // Give a driver that went away another chance.
+                    self.failures = 0;
+                    self.degraded = false;
                 }
                 PlatformEvent::DisplayOff => self.display_off = true,
                 PlatformEvent::PowerSourceChanged(src) => {
@@ -128,19 +190,27 @@ impl Daemon {
 
         if now.duration_since(self.last_level_poll) >= LEVEL_POLL {
             self.last_level_poll = now;
-            if let Ok(observed) = self.backlight.get_level() {
-                if self.level != Some(observed) {
-                    self.level = Some(observed);
-                    report.level_changed = true;
+            match self.backlight.get_level() {
+                Ok(observed) => {
+                    self.failures = 0;
+                    self.degraded = false;
+                    if self.level != Some(observed) {
+                        self.level = Some(observed);
+                        report.level_changed = true;
+                    }
+                    let was = self.engine.is_suspended();
+                    self.engine.on_observed_level(observed);
+                    report.override_detected = self.engine.is_suspended() && !was;
                 }
-                let was = self.engine.is_suspended();
-                self.engine.on_observed_level(observed);
-                report.override_detected = self.engine.is_suspended() && !was;
+                Err(_) => {
+                    self.failures += 1;
+                    self.degraded = self.failures >= DEGRADE_AFTER;
+                }
             }
         }
 
         if let Some(desired) = self.engine.tick(now) {
-            if self.backlight.set_level(desired).is_ok() {
+            if self.write_level(desired, now) {
                 self.engine.note_applied(desired);
                 if self.level != Some(desired) {
                     self.level = Some(desired);
@@ -152,12 +222,14 @@ impl Daemon {
         let phase = self.engine.phase();
         report.phase_changed = self.last_phase != Some(phase);
         self.last_phase = Some(phase);
+        report.degraded_changed = self.degraded != was_degraded;
         report
     }
 
     /// Pick a level by hand and stop automatic control until the next resume.
     pub fn set_level_manual(&mut self, level: Level) {
-        if self.backlight.set_level(level).is_ok() {
+        let now = Instant::now();
+        if self.write_level(level, now) {
             self.engine.note_applied(level);
             self.level = Some(level);
         }
@@ -178,7 +250,8 @@ impl Daemon {
     pub fn shutdown(&mut self) {
         if let Some(level) = self.engine.exit_level() {
             self.backlight.invalidate_cache();
-            let _ = self.backlight.set_level(level);
+            let now = Instant::now();
+            self.write_level(level, now);
         }
     }
 }

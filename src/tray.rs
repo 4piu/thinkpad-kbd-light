@@ -11,8 +11,8 @@ use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-    NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon,
@@ -68,6 +68,17 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Copy a string into one of NOTIFYICONDATAW's fixed-size UTF-16 fields, always
+/// NUL-terminated even when the text has to be cut short.
+fn fill(dst: &mut [u16], text: &str) {
+    let src = wide(text);
+    let n = src.len().min(dst.len());
+    dst[..n].copy_from_slice(&src[..n]);
+    if let Some(last) = dst.get_mut(n.saturating_sub(1)) {
+        *last = 0;
+    }
+}
+
 /// Build a 32x32 icon whose brightness reflects `level`.
 ///
 /// A mid-grey keyboard outline keeps the icon legible on both light and dark taskbars,
@@ -82,7 +93,12 @@ fn make_icon(level: Option<Level>) -> Option<windows_sys::Win32::UI::WindowsAndM
         Some(Level::Low) => ((70, 120, 160), 220),
         Some(Level::Off) | None => ((0, 0, 0), 0),
     };
-    let outline = (170u8, 170u8, 170u8);
+    // `None` means we cannot read the hardware. Amber rather than grey, so a broken
+    // driver does not look the same as a backlight that is simply switched off.
+    let outline = match level {
+        None => (230u8, 160u8, 60u8),
+        Some(_) => (170u8, 170u8, 170u8),
+    };
 
     // Keyboard body: rounded rectangle from (4,9) to (27,23).
     let (x0, y0, x1, y1) = (4usize, 9usize, 27usize, 23usize);
@@ -328,12 +344,7 @@ impl Tray {
         data.uCallbackMessage = WM_TRAY;
         data.hIcon = icon.unwrap_or(std::ptr::null_mut());
 
-        let tip_wide = wide(tip);
-        let n = tip_wide.len().min(data.szTip.len());
-        data.szTip[..n].copy_from_slice(&tip_wide[..n]);
-        if let Some(last) = data.szTip.get_mut(n.saturating_sub(1)) {
-            *last = 0;
-        }
+        fill(&mut data.szTip, tip);
 
         // SAFETY: `data` is fully initialised with its size set.
         let ok = unsafe { Shell_NotifyIconW(action, &data) };
@@ -359,6 +370,20 @@ impl Tray {
         }
         self.shown_level = Some(level);
         let _ = self.notify(NIM_MODIFY, level, tip);
+    }
+
+    /// Show a balloon notification from the tray icon.
+    pub fn balloon(&self, title: &str, text: &str) {
+        let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
+        data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        data.hWnd = self.hwnd;
+        data.uID = 1;
+        data.uFlags = NIF_INFO;
+        data.dwInfoFlags = NIIF_INFO;
+        fill(&mut data.szInfoTitle, title);
+        fill(&mut data.szInfo, text);
+        // SAFETY: `data` is fully initialised with its size set.
+        unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
     }
 
     /// Publish the state the context menu should show next time it opens.

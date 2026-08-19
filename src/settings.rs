@@ -97,10 +97,20 @@ pub struct Settings {
     pub turn_off_when_locked: bool,
     /// On exit, restore the profile's active level rather than leaving it dark.
     pub restore_on_exit: bool,
+    /// Hide Lenovo's on-screen popup for level changes this program makes.
+    ///
+    /// Fn+Space keeps its popup either way: that one is the firmware's, and we never
+    /// write for it. See [`crate::osd`].
+    #[serde(default = "default_true")]
+    pub suppress_osd: bool,
     pub start_with_windows: bool,
 }
 
 pub const CURRENT_VERSION: u32 = 1;
+
+fn default_true() -> bool {
+    true
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -121,6 +131,7 @@ impl Default for Settings {
             },
             turn_off_when_locked: true,
             restore_on_exit: true,
+            suppress_osd: true,
             start_with_windows: false,
         }
     }

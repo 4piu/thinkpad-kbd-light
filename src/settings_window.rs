@@ -70,6 +70,7 @@ struct Controls {
     battery: ProfileControls,
     turn_off_when_locked: HWND,
     restore_on_exit: HWND,
+    suppress_osd: HWND,
     font: HFONT,
 }
 
@@ -314,6 +315,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) ->
                             battery: read_profile(&c.battery),
                             turn_off_when_locked: checked(c.turn_off_when_locked),
                             restore_on_exit: checked(c.restore_on_exit),
+                            suppress_osd: checked(c.suppress_osd),
                             // Owned by the tray menu, not this window; the caller merges
                             // the live value back in.
                             start_with_windows: false,
@@ -384,7 +386,7 @@ pub fn open(settings: &Settings) -> io::Result<()> {
     OUTCOME.with(|o| *o.borrow_mut() = None);
 
     let class_name = wide("TkblSettingsWindow");
-    let (w, h) = (470, 320);
+    let (w, h) = (470, 348);
 
     // SAFETY: standard window creation; all strings outlive the calls.
     let hwnd = unsafe {
@@ -518,25 +520,27 @@ pub fn open(settings: &Settings) -> io::Result<()> {
             x: 16,
             y: 176,
             w: 434,
-            h: 74,
+            h: 100,
         },
         0,
     );
     let turn_off_when_locked = b.checkbox("Turn the backlight off while locked", 30, 192, 300);
     let restore_on_exit = b.checkbox("Restore the light when exiting", 30, 218, 300);
+    let suppress_osd = b.checkbox("Hide Lenovo's popup for automatic changes", 30, 244, 340);
     set_checked(turn_off_when_locked, settings.turn_off_when_locked);
     set_checked(restore_on_exit, settings.restore_on_exit);
+    set_checked(suppress_osd, settings.suppress_osd);
 
     b.label(
         "Three hardware levels; dimming drops to the one below Active.",
         20,
-        260,
+        288,
         420,
     );
 
     let button = |x| R {
         x,
-        y: 280,
+        y: 308,
         w: 85,
         h: 26,
     };
@@ -555,6 +559,7 @@ pub fn open(settings: &Settings) -> io::Result<()> {
             battery,
             turn_off_when_locked,
             restore_on_exit,
+            suppress_osd,
             font,
         })
     });
