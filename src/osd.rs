@@ -24,7 +24,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 /// How long after a write to keep watching for the popup.
-const WINDOW: Duration = Duration::from_millis(600);
+///
+/// The whole period is watched, not just until the first hide: the popup can be shown
+/// more than once for a single change (it animates), and stopping early let the re-show
+/// through as a visible flash.
+const WINDOW: Duration = Duration::from_millis(700);
+
+/// Gap between checks while watching. Tight enough that a show is caught within a frame.
+const CHECK: Duration = Duration::from_millis(2);
 /// How often to re-check which process is `tposd.exe`; it can be restarted.
 const PID_TTL: Duration = Duration::from_secs(30);
 
@@ -96,9 +103,6 @@ fn find_tposd() -> Option<u32> {
 pub struct OsdSuppressor {
     pid: Option<u32>,
     pid_checked: Option<Instant>,
-    /// Windows already on screen when we armed; these are not ours to hide.
-    before: Vec<HWND>,
-    until: Option<Instant>,
 }
 
 impl OsdSuppressor {
@@ -107,6 +111,10 @@ impl OsdSuppressor {
     }
 
     /// Call immediately *before* writing a level.
+    ///
+    /// Spawns a short-lived watcher rather than doing the work inline: the popup has to be
+    /// caught within a frame to avoid a visible flash, and polling that tightly on the UI
+    /// thread would stall the tray for the best part of a second on every level change.
     pub fn arm(&mut self, now: Instant) {
         let stale = self
             .pid_checked
@@ -116,41 +124,26 @@ impl OsdSuppressor {
             self.pid_checked = Some(now);
         }
         let Some(pid) = self.pid else { return };
-        self.before = visible_windows_of(pid);
-        self.until = Some(now + WINDOW);
-    }
 
-    /// Hide any popup that has appeared since [`arm`]. Cheap when not armed.
-    ///
-    /// Returns true once it has hidden something, so the caller can stop early.
-    pub fn poll(&mut self, now: Instant) -> bool {
-        let Some(until) = self.until else {
-            return false;
-        };
-        if now >= until {
-            self.until = None;
-            return false;
-        }
-        let Some(pid) = self.pid else {
-            self.until = None;
-            return false;
-        };
+        // Anything already on screen is not ours to hide. HWND is a raw pointer and so
+        // not `Send`; the watcher only ever passes these back to Win32, so carry them as
+        // integers across the thread boundary.
+        let before: Vec<usize> = visible_windows_of(pid)
+            .into_iter()
+            .map(|h| h as usize)
+            .collect();
 
-        let mut hid = false;
-        for hwnd in visible_windows_of(pid) {
-            if !self.before.contains(&hwnd) {
-                // SAFETY: hiding a top-level window owned by the same user session.
-                unsafe { ShowWindow(hwnd, SW_HIDE) };
-                hid = true;
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + WINDOW;
+            while Instant::now() < deadline {
+                for hwnd in visible_windows_of(pid) {
+                    if !before.contains(&(hwnd as usize)) {
+                        // SAFETY: hiding a top-level window in the same user session.
+                        unsafe { ShowWindow(hwnd, SW_HIDE) };
+                    }
+                }
+                std::thread::sleep(CHECK);
             }
-        }
-        if hid {
-            self.until = None;
-        }
-        hid
-    }
-
-    pub fn disarm(&mut self) {
-        self.until = None;
+        });
     }
 }

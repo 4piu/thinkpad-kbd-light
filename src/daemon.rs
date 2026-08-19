@@ -26,10 +26,6 @@ pub const LEVEL_POLL: Duration = Duration::from_secs(1);
 /// Consecutive driver errors before we call the backlight unavailable and say so.
 const DEGRADE_AFTER: u32 = 5;
 
-/// Upper bound on how long a write waits around to hide the OSD popup it caused.
-const OSD_BURST: Duration = Duration::from_millis(400);
-const OSD_BURST_STEP: Duration = Duration::from_millis(20);
-
 /// What changed during a [`Daemon::step`], for the front end to reflect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StepReport {
@@ -123,23 +119,9 @@ impl Daemon {
             Ok(()) => {
                 self.failures = 0;
                 self.degraded = false;
-                if suppress {
-                    // The popup appears a few milliseconds later, so wait briefly rather
-                    // than leaving it on screen until the next tick. Bounded, and it exits
-                    // as soon as the popup has been hidden.
-                    let deadline = Instant::now() + OSD_BURST;
-                    while Instant::now() < deadline {
-                        if self.osd.poll(Instant::now()) {
-                            break;
-                        }
-                        std::thread::sleep(OSD_BURST_STEP);
-                    }
-                    self.osd.disarm();
-                }
                 true
             }
             Err(_) => {
-                self.osd.disarm();
                 self.failures += 1;
                 self.degraded = self.failures >= DEGRADE_AFTER;
                 false
