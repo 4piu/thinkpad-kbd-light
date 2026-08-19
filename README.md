@@ -6,9 +6,13 @@ ThinkPad firmware forgets the keyboard backlight level across sleep and reboot, 
 comes back dark. This fixes that, and adds idle dimming, idle timeout, and separate
 profiles for AC and battery.
 
+<p align="center"><img src="assets/icon-preview.png" width="96" alt=""></p>
+
 **Status: feature complete.** `tkbl-tray` runs in the notification area and does the whole
 job — light on input, dim and off on idle, AC/battery profiles, re-applying the level after
 sleep, and a settings window.
+
+<p align="center"><img src="docs/settings-window.png" width="486" alt="The settings window, with AC and Battery profiles side by side"></p>
 
 ## How it works
 
@@ -44,13 +48,36 @@ Developed and verified on a **ThinkPad X1 Carbon 6th Gen (20KG)**, BIOS 1.68, Wi
 26100. Other ThinkPads that expose the `MLCG`/`MLCS` ACPI methods should work; some models
 use `KLCG`/`KLCS` instead, which the two-tier HAL makes easy to add.
 
+## Footprint
+
+It runs all day, so this matters. Measured on the X1C6 over 60 s idle, with the 250 ms
+state-machine tick and the once-a-second hardware poll both running:
+
+| | |
+|---|---|
+| CPU | **0.36 %** of one core (0.045 % of the 8-core machine) |
+| Working set | **10.4 MB** |
+| Private bytes | **1.6 MB** |
+| Threads | 3 |
+| `tkbl-tray.exe` | 257 KB, no runtime dependencies |
+
+The once-a-second `MLCG` poll traps into SMM; measured at **1.75 ms median** per call, so
+about 0.2 % of a core, and most of what is left.
+
 ## Build
 
 ```sh
 cargo build --release
 ```
 
-Produces a self-contained `target/release/tkbl.exe`, about 135 KB, no runtime dependencies.
+Needs `rc.exe` from the Windows SDK to embed the icon — the MSVC toolchain already requires
+it. Without one the build still succeeds, just without an icon.
+
+The icon is generated rather than checked in as art:
+
+```sh
+python assets/make_icon.py     # rewrites assets/tkbl.ico
+```
 
 ## Usage
 
@@ -83,20 +110,7 @@ wake — the program will not fight you for the backlight.
 
 ### Settings
 
-Both profiles are shown side by side, because the asymmetry between them is the point:
-
-```
-Profile           AC power        Battery
-Enabled              [x]            [x]
-Active level      [High  v]      [Low   v]
-Dim after (s)     [x] 30         [ ] 30      <- greyed: nothing to dim to
-Off after (s)     [x] 300        [x] 60
-
-[x] Turn the backlight off while locked
-[x] Restore the light when exiting
-[x] Hide Lenovo's popup for automatic changes
-```
-
+Both profiles are shown side by side, because the asymmetry between them is the point.
 Each timeout has its own tick box, so either can be switched off independently.
 
 There is no "dim to" setting. With three levels, the only target that is not already

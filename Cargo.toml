@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Keyboard backlight control for ThinkPads (X1 Carbon 6th and relatives)"
 license = "MIT"
+build = "build.rs"
 
 [lib]
 name = "tkbl"
@@ -12,6 +13,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "tkbl"
 path = "src/main.rs"
+
+[build-dependencies]
+winresource = "0.1"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -100,6 +100,17 @@ impl Backlight {
         self.gateway.evaluate(IOCTL_MLCG, 0)
     }
 
+    /// Whether [`BacklightController::set_level`] would actually reach the hardware,
+    /// rather than being dropped by write-on-change.
+    ///
+    /// Callers that do expensive preparation around a write - suppressing Lenovo's OSD,
+    /// for one - need to know this *before* writing, or they pay that cost on every tick
+    /// for a write that never happens.
+    pub fn would_change(&self, level: Level) -> bool {
+        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.last_written != Some(level)
+    }
+
     /// Forget what we last wrote, so the next `set_level` always reaches the hardware.
     ///
     /// Call this after resume/unlock: the firmware forgets the level across sleep, so our

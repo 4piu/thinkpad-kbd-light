@@ -109,8 +109,11 @@ impl Daemon {
 
     /// Write a level, hiding the OSD popup it causes and tracking driver health.
     fn write_level(&mut self, level: Level, now: Instant) -> bool {
-        let suppress = self.engine.settings().suppress_osd;
-        if suppress {
+        // Only prepare to suppress when a write will really happen. This is called on
+        // every tick, and arming unconditionally left overlapping watcher threads
+        // enumerating every window in the session, forever, for writes that
+        // write-on-change was about to discard.
+        if self.engine.settings().suppress_osd && self.backlight.would_change(level) {
             // Snapshot before the write: anything appearing after it is ours to hide.
             self.osd.arm(now);
         }

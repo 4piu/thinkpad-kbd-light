@@ -5,3 +5,6 @@ scratch/
 # Rust
 /target
 
+
+# icon working files (tkbl.ico is committed; previews are regenerated)
+/assets/icon-sizes.png
