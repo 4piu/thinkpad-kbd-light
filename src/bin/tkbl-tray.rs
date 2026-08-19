@@ -151,16 +151,8 @@ fn main() {
         let mut quit = false;
         for event in tray.take_events() {
             match event {
-                TrayEvent::Toggle => {
-                    // Simple: dark -> the profile's active level, lit -> off.
-                    let active = settings
-                        .profile(daemon.engine().power_source())
-                        .active_level;
-                    let next = match daemon.level() {
-                        Some(Level::Off) | None => active,
-                        Some(_) => Level::Off,
-                    };
-                    daemon.set_level_manual(next);
+                TrayEvent::Activate => {
+                    let _ = settings_window::open(&settings);
                 }
                 TrayEvent::MenuCommand(id) => match id {
                     ID_ON => daemon.set_level_manual(Level::High),

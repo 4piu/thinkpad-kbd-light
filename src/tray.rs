@@ -38,8 +38,9 @@ pub const ID_EXIT: u32 = 1030;
 /// Something the user did to the tray icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayEvent {
-    /// Left click: toggle between off and the profile's active level.
-    Toggle,
+    /// Left click. Opens the settings window, the conventional thing for a tray icon;
+    /// the level itself is on the right-click menu.
+    Activate,
     MenuCommand(u32),
 }
 
@@ -182,7 +183,7 @@ unsafe extern "system" fn tray_proc(
     match msg {
         WM_TRAY => {
             match lparam as u32 {
-                WM_LBUTTONUP => TRAY_EVENTS.with(|e| e.borrow_mut().push(TrayEvent::Toggle)),
+                WM_LBUTTONUP => TRAY_EVENTS.with(|e| e.borrow_mut().push(TrayEvent::Activate)),
                 WM_RBUTTONUP => unsafe { show_menu(hwnd) },
                 _ => {}
             }

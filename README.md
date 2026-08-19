@@ -67,8 +67,7 @@ tkbl test             # cycle off -> low -> high, then restore
 tkbl-tray             # the real thing: runs in the notification area, no console
 ```
 
-The icon shows the current level. Left-click toggles between off and the profile's active
-level. Right-click gives:
+The icon shows the current level. Left-click opens the settings window; right-click gives:
 
 ```
   On (high) / Dim (low) / Off      pick a level by hand

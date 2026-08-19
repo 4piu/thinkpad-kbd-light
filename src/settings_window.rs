@@ -20,8 +20,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, GetSystemMetrics,
     GetWindowTextW, MessageBoxW, PostMessageW, RegisterClassExW, SendMessageW, SetForegroundWindow,
     SetWindowTextW, ShowWindow, CW_USEDEFAULT, MB_ICONWARNING, MB_OK, SM_CXSCREEN, SM_CYSCREEN,
-    SW_SHOW, WM_CLOSE, WM_COMMAND, WM_DESTROY, WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_MINIMIZEBOX,
-    WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+    SW_RESTORE, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_DESTROY, WNDCLASSEXW, WS_CAPTION, WS_CHILD,
+    WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
 };
 
 use crate::backlight::Level;
@@ -78,6 +78,8 @@ thread_local! {
     static CONTROLS: RefCell<Option<Controls>> = const { RefCell::new(None) };
     static OUTCOME: RefCell<Option<Outcome>> = const { RefCell::new(None) };
     static OPEN: RefCell<bool> = const { RefCell::new(false) };
+    /// Handle of the live window, so a second request can raise it instead of ignoring.
+    static WINDOW: RefCell<isize> = const { RefCell::new(0) };
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -361,6 +363,7 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) ->
                 }
             });
             OPEN.with(|o| *o.borrow_mut() = false);
+            WINDOW.with(|w| *w.borrow_mut() = 0);
             0
         }
         // SAFETY: standard default handling.
@@ -378,9 +381,20 @@ pub fn take_outcome() -> Option<Outcome> {
     OUTCOME.with(|o| o.borrow_mut().take())
 }
 
-/// Show the settings window. Does nothing if it is already open.
+/// Show the settings window, raising the existing one if it is already up.
 pub fn open(settings: &Settings) -> io::Result<()> {
     if is_open() {
+        // Clicking the tray icon again should bring the window forward, not do nothing.
+        WINDOW.with(|w| {
+            let hwnd = *w.borrow() as HWND;
+            if !hwnd.is_null() {
+                // SAFETY: the handle is live while OPEN is set; cleared on WM_DESTROY.
+                unsafe {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    SetForegroundWindow(hwnd);
+                }
+            }
+        });
         return Ok(());
     }
     OUTCOME.with(|o| *o.borrow_mut() = None);
@@ -564,6 +578,7 @@ pub fn open(settings: &Settings) -> io::Result<()> {
         })
     });
     OPEN.with(|o| *o.borrow_mut() = true);
+    WINDOW.with(|w| *w.borrow_mut() = hwnd as isize);
     refresh_enabled();
 
     // SAFETY: showing the window we just created.
