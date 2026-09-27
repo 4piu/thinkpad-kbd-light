@@ -19,6 +19,22 @@ pub enum PowerSource {
     Battery,
 }
 
+/// Coordinates returned by Windows Location and kept locally for offline solar calculations.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Location {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+impl Location {
+    pub fn valid(self) -> bool {
+        self.latitude.is_finite()
+            && self.longitude.is_finite()
+            && (-90.0..=90.0).contains(&self.latitude)
+            && (-180.0..=180.0).contains(&self.longitude)
+    }
+}
+
 /// Behaviour for one power source.
 ///
 /// Some combinations are meaningless rather than invalid, and are resolved by the
@@ -104,6 +120,14 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub suppress_osd: bool,
     pub start_with_windows: bool,
+    /// Restrict automatic control to sunset-to-sunrise at the Windows-provided location.
+    #[serde(default)]
+    pub sunset_only: bool,
+    #[serde(default)]
+    pub sunset_location: Option<Location>,
+    /// External devices do not wake or extend automatic backlighting.
+    #[serde(default)]
+    pub internal_input_only: bool,
 }
 
 pub const CURRENT_VERSION: u32 = 1;
@@ -133,6 +157,9 @@ impl Default for Settings {
             restore_on_exit: true,
             suppress_osd: true,
             start_with_windows: false,
+            sunset_only: false,
+            sunset_location: None,
+            internal_input_only: false,
         }
     }
 }
@@ -281,6 +308,17 @@ mod tests {
         assert_eq!(s, back);
         // Levels are human-editable names, not magic numbers.
         assert!(text.contains("\"high\""));
+    }
+
+    #[test]
+    fn existing_settings_without_sunset_fields_still_load() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("sunset_only");
+        object.remove("sunset_location");
+        let loaded: Settings = serde_json::from_value(value).unwrap();
+        assert!(!loaded.sunset_only);
+        assert_eq!(loaded.sunset_location, None);
     }
 
     #[test]

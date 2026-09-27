@@ -60,9 +60,8 @@ pub enum PlatformEvent {
 
 /// Idle time as reported by the OS.
 ///
-/// Uses `GetLastInputInfo`, which reports *that* input happened without exposing what was
-/// typed. Deliberate: this process must never be able to read keystrokes. See
-/// `notes/02-design-spec.md` §3.3.
+/// Used in the all-device mode. Built-in-only mode instead consumes the device identity
+/// and type from Raw Input headers; neither mode reads key codes or typed contents.
 pub fn idle_duration() -> Duration {
     let mut info = LASTINPUTINFO {
         cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
@@ -103,6 +102,18 @@ unsafe extern "system" fn wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        0x00FF => {
+            // WM_INPUT
+            // SAFETY: lparam is the live raw-input handle for this callback.
+            unsafe { crate::input::observe(lparam) };
+            // Windows requires default handling for foreground raw-input cleanup.
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+        0x00FE => {
+            // WM_INPUT_DEVICE_CHANGE
+            crate::input::clear_device_cache();
+            0
+        }
         WM_POWERBROADCAST => {
             match wparam as u32 {
                 PBT_APMRESUMESUSPEND | PBT_APMRESUMEAUTOMATIC => push(PlatformEvent::Resume),
@@ -203,6 +214,12 @@ impl EventPump {
             return Err(io::Error::last_os_error());
         }
 
+        if let Err(e) = crate::input::register(hwnd) {
+            // SAFETY: the newly created window is ours.
+            unsafe { DestroyWindow(hwnd) };
+            return Err(e);
+        }
+
         // SAFETY: hwnd is valid. Failures are non-fatal: we degrade to polling only.
         unsafe {
             RegisterPowerSettingNotification(hwnd as _, &GUID_ACDC_POWER_SOURCE, 0);
@@ -253,6 +270,7 @@ pub fn pump_messages() {
 
 impl Drop for EventPump {
     fn drop(&mut self) {
+        crate::input::unregister();
         // SAFETY: hwnd was created by us and is destroyed once.
         unsafe {
             DestroyWindow(self.hwnd);
