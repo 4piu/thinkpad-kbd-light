@@ -6,6 +6,8 @@
 
 use std::cell::RefCell;
 use std::io;
+use std::thread;
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject};
@@ -331,8 +333,20 @@ impl Tray {
             icon: None,
             shown_level: None,
         };
-        tray.notify(NIM_ADD, None, "ThinkPad keyboard backlight")?;
-        Ok(tray)
+        // At logon the app can start before Explorer has created its
+        // notification area. Give the shell time to come up instead of showing
+        // an error dialog for a transient NIM_ADD failure.
+        let mut last_error = None;
+        for attempt in 0..30 {
+            match tray.notify(NIM_ADD, None, "ThinkPad keyboard backlight") {
+                Ok(()) => return Ok(tray),
+                Err(error) => last_error = Some(error),
+            }
+            if attempt < 29 {
+                thread::sleep(Duration::from_secs(2));
+            }
+        }
+        Err(last_error.expect("at least one tray registration attempt"))
     }
 
     fn notify(&mut self, action: u32, level: Option<Level>, tip: &str) -> io::Result<()> {
