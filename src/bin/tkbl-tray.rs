@@ -5,6 +5,7 @@
 
 #![windows_subsystem = "windows"]
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -122,7 +123,25 @@ fn main() {
 
     let mut tray = match Tray::new() {
         Ok(t) => t,
-        Err(e) => fatal(&format!("Cannot create the tray icon:\n{e}")),
+        Err(e) => {
+            // A shell startup failure should not show a modal dialog on every
+            // scheduled retry. Leave a diagnostic and let the task try again.
+            if let Some(folder) = path.parent() {
+                let _ = std::fs::create_dir_all(folder);
+                if let Ok(mut log) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(folder.join("startup.log"))
+                {
+                    let _ = writeln!(
+                        log,
+                        "{:?}: cannot create tray icon: {e}",
+                        std::time::SystemTime::now()
+                    );
+                }
+            }
+            std::process::exit(1);
+        }
     };
 
     let mut settings = settings;

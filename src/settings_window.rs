@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::backlight::Level;
-use crate::settings::{Profile, Settings};
+use crate::settings::{Location, Profile, Settings};
 
 // Stable Win32 constants, defined here rather than chased across windows-sys features.
 const BS_AUTOCHECKBOX: u32 = 0x0003;
@@ -71,6 +71,9 @@ struct Controls {
     turn_off_when_locked: HWND,
     restore_on_exit: HWND,
     suppress_osd: HWND,
+    sunset_only: HWND,
+    internal_input_only: HWND,
+    sunset_location: Option<Location>,
     font: HFONT,
 }
 
@@ -318,17 +321,32 @@ unsafe extern "system" fn proc_(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) ->
                             turn_off_when_locked: checked(c.turn_off_when_locked),
                             restore_on_exit: checked(c.restore_on_exit),
                             suppress_osd: checked(c.suppress_osd),
+                            sunset_only: checked(c.sunset_only),
+                            sunset_location: c.sunset_location,
+                            internal_input_only: checked(c.internal_input_only),
                             // Owned by the tray menu, not this window; the caller merges
                             // the live value back in.
                             start_with_windows: false,
                         })
                     });
                     if let Some(settings) = built {
+                        let mut settings = settings;
                         for (name, p) in [("AC", &settings.ac), ("Battery", &settings.battery)] {
                             if let Err(e) = p.validate() {
                                 warn(hwnd, &format!("{name}: {e}"));
                                 return 0;
                             }
+                        }
+                        if settings.sunset_only {
+                            match crate::location::from_windows_settings() {
+                                Ok(location) => settings.sunset_location = Some(location),
+                                Err(e) => {
+                                    warn(hwnd, &e);
+                                    return 0;
+                                }
+                            }
+                        } else {
+                            settings.sunset_location = None;
                         }
                         OUTCOME
                             .with(|o| *o.borrow_mut() = Some(Outcome::Saved(Box::new(settings))));
@@ -400,7 +418,7 @@ pub fn open(settings: &Settings) -> io::Result<()> {
     OUTCOME.with(|o| *o.borrow_mut() = None);
 
     let class_name = wide("TkblSettingsWindow");
-    let (w, h) = (470, 348);
+    let (w, h) = (470, 406);
 
     // SAFETY: standard window creation; all strings outlive the calls.
     let hwnd = unsafe {
@@ -534,27 +552,41 @@ pub fn open(settings: &Settings) -> io::Result<()> {
             x: 16,
             y: 176,
             w: 434,
-            h: 100,
+            h: 152,
         },
         0,
     );
     let turn_off_when_locked = b.checkbox("Turn the backlight off while locked", 30, 192, 300);
     let restore_on_exit = b.checkbox("Restore the light when exiting", 30, 218, 300);
     let suppress_osd = b.checkbox("Hide Lenovo's popup for automatic changes", 30, 244, 340);
+    let sunset_only = b.checkbox(
+        "Only light after sunset (Windows Location on Save)",
+        30,
+        270,
+        400,
+    );
     set_checked(turn_off_when_locked, settings.turn_off_when_locked);
     set_checked(restore_on_exit, settings.restore_on_exit);
     set_checked(suppress_osd, settings.suppress_osd);
+    set_checked(sunset_only, settings.sunset_only);
+    let internal_input_only = b.checkbox(
+        "Only built-in keyboard / touchpad / TrackPoint wake light",
+        30,
+        296,
+        410,
+    );
+    set_checked(internal_input_only, settings.internal_input_only);
 
     b.label(
         "Three hardware levels; dimming drops to the one below Active.",
         20,
-        288,
+        341,
         420,
     );
 
     let button = |x| R {
         x,
-        y: 308,
+        y: 366,
         w: 85,
         h: 26,
     };
@@ -574,6 +606,9 @@ pub fn open(settings: &Settings) -> io::Result<()> {
             turn_off_when_locked,
             restore_on_exit,
             suppress_osd,
+            sunset_only,
+            internal_input_only,
+            sunset_location: settings.sunset_location,
             font,
         })
     });

@@ -27,6 +27,8 @@ pub struct Engine {
     settings: Settings,
     source: PowerSource,
     locked: bool,
+    daylight: bool,
+    internal_input_seen: bool,
     suspended: bool,
     last_input: Instant,
     /// The level we last successfully wrote, used to spot external changes.
@@ -40,6 +42,8 @@ impl Engine {
             settings,
             source,
             locked: false,
+            daylight: false,
+            internal_input_seen: false,
             suspended: false,
             last_input: now,
             last_commanded: None,
@@ -64,18 +68,27 @@ impl Engine {
     }
 
     pub fn replace_settings(&mut self, settings: Settings) {
+        if settings.internal_input_only && !self.settings.internal_input_only {
+            self.internal_input_seen = false;
+        }
         self.settings = settings;
     }
 
     /// Any keyboard, mouse or touchpad activity.
     pub fn on_input(&mut self, now: Instant) {
         self.last_input = now;
+        self.internal_input_seen = true;
     }
 
     /// AC ↔ battery. Deliberately does *not* clear a manual override: the user's
     /// Fn+Space press is about the light, not about the power source.
     pub fn set_power_source(&mut self, source: PowerSource) {
         self.source = source;
+    }
+
+    /// The solar gate is evaluated by the daemon using the last Windows location.
+    pub fn set_daylight(&mut self, daylight: bool) {
+        self.daylight = daylight;
     }
 
     /// Session lock and unlock. Unlocking counts as activity.
@@ -93,6 +106,7 @@ impl Engine {
     /// unconditionally. That last part is the whole point of the application: the firmware
     /// forgets the level across sleep, so we must assert it rather than assume it holds.
     pub fn on_resume(&mut self, now: Instant) {
+        self.internal_input_seen = false;
         self.suspended = false;
         self.last_input = now;
         self.last_commanded = None;
@@ -144,6 +158,14 @@ impl Engine {
             self.phase = Phase::Suspended;
             return None;
         }
+        if self.settings.sunset_only && self.daylight {
+            self.phase = Phase::Off;
+            return Some(Level::Off);
+        }
+        if self.settings.internal_input_only && !self.internal_input_seen {
+            self.phase = Phase::Off;
+            return Some(Level::Off);
+        }
         if self.locked && self.settings.turn_off_when_locked {
             self.phase = Phase::Off;
             return Some(Level::Off);
@@ -173,7 +195,14 @@ impl Engine {
     /// Level to leave behind on exit, so quitting never leaves a dark keyboard.
     pub fn exit_level(&self) -> Option<Level> {
         if self.settings.restore_on_exit {
-            Some(self.settings.profile(self.source).active_level)
+            Some(
+                if (self.settings.sunset_only && self.daylight) || self.settings.internal_input_only
+                {
+                    Level::Off
+                } else {
+                    self.settings.profile(self.source).active_level
+                },
+            )
         } else {
             None
         }
@@ -361,6 +390,58 @@ mod tests {
         let mut e2 = Engine::new(s, PowerSource::Ac, Instant::now());
         assert_eq!(e2.exit_level(), None);
         e2.on_input(Instant::now());
+    }
+
+    #[test]
+    fn sunset_gate_keeps_day_off_and_restores_night_profile() {
+        let now = Instant::now();
+        let s = Settings {
+            sunset_only: true,
+            ..Settings::default()
+        };
+        let mut e = Engine::new(s, PowerSource::Ac, now);
+        e.set_daylight(true);
+        assert_eq!(e.tick(now), Some(Level::Off));
+        assert_eq!(e.exit_level(), Some(Level::Off));
+        e.set_daylight(false);
+        assert_eq!(e.tick(now), Some(Level::High));
+        assert_eq!(e.exit_level(), Some(Level::High));
+    }
+
+    #[test]
+    fn built_in_input_is_required_on_startup_and_after_resume() {
+        let now = Instant::now();
+        let s = Settings {
+            internal_input_only: true,
+            ..Settings::default()
+        };
+        let mut e = Engine::new(s, PowerSource::Ac, now);
+        assert_eq!(e.tick(now), Some(Level::Off));
+        e.on_input(now + secs(1));
+        assert_eq!(e.tick(now + secs(1)), Some(Level::High));
+        assert_eq!(e.tick(now + secs(301)), Some(Level::Off));
+        e.on_resume(now + secs(302));
+        assert_eq!(e.tick(now + secs(302)), Some(Level::Off));
+        e.on_input(now + secs(303));
+        assert_eq!(e.tick(now + secs(303)), Some(Level::High));
+        assert_eq!(e.exit_level(), Some(Level::Off));
+    }
+
+    #[test]
+    fn manual_override_still_wins_over_built_in_input_gate() {
+        let now = Instant::now();
+        let mut e = Engine::new(
+            Settings {
+                internal_input_only: true,
+                ..Settings::default()
+            },
+            PowerSource::Ac,
+            now,
+        );
+        e.pause();
+        assert_eq!(e.tick(now), None);
+        e.resume_control();
+        assert_eq!(e.tick(now), Some(Level::Off));
     }
 
     #[test]

@@ -25,10 +25,13 @@ pub mod autostart;
 pub mod backlight;
 pub mod daemon;
 pub mod engine;
+pub mod input;
+pub mod location;
 pub mod osd;
 pub mod platform;
 pub mod settings;
 pub mod settings_window;
+pub mod solar;
 pub mod tray;
 
 pub use acpi::AcpiGateway;

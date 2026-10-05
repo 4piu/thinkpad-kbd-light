@@ -4,7 +4,7 @@
 //! an icon. Keeping it here means the behaviour cannot drift between the two.
 
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::backlight::BacklightController;
 use crate::engine::Phase;
@@ -53,6 +53,8 @@ pub struct Daemon {
     osd: OsdSuppressor,
     /// While the display is off the user is not there, so we stop driving entirely.
     display_off: bool,
+    last_solar_poll: Instant,
+    last_internal_processed: Option<Instant>,
     last_level_poll: Instant,
     last_phase: Option<Phase>,
     level: Option<Level>,
@@ -77,6 +79,8 @@ impl Daemon {
             pump,
             osd: OsdSuppressor::new(),
             display_off: false,
+            last_solar_poll: now.checked_sub(Duration::from_secs(61)).unwrap_or(now),
+            last_internal_processed: None,
             last_level_poll: now,
             last_phase: None,
             level: None,
@@ -105,6 +109,21 @@ impl Daemon {
 
     pub fn replace_settings(&mut self, settings: Settings) {
         self.engine.replace_settings(settings);
+        self.refresh_solar();
+    }
+
+    fn refresh_solar(&mut self) {
+        let s = self.engine.settings();
+        if s.sunset_only {
+            // An absent or invalid position keeps automatic lighting off.
+            let daylight = s
+                .sunset_location
+                .and_then(|location| crate::solar::sun_is_down(SystemTime::now(), location))
+                != Some(true);
+            self.engine.set_daylight(daylight);
+        } else {
+            self.engine.set_daylight(false);
+        }
     }
 
     /// Write a level, hiding the OSD popup it causes and tracking driver health.
@@ -137,6 +156,14 @@ impl Daemon {
     pub fn step(&mut self, now: Instant) -> StepReport {
         let mut report = StepReport::default();
         let was_degraded = self.degraded;
+        let internal_input = crate::input::activity().last_internal;
+        let new_internal_input = internal_input != self.last_internal_processed;
+        self.last_internal_processed = internal_input;
+
+        if now.duration_since(self.last_solar_poll) >= Duration::from_secs(60) {
+            self.last_solar_poll = now;
+            self.refresh_solar();
+        }
 
         for event in self.pump.take_events() {
             match event {
@@ -169,9 +196,16 @@ impl Daemon {
             return report;
         }
 
-        // The OS is the authority on idle time; sync to it rather than tracking input.
-        let idle = platform::idle_duration();
-        self.engine.on_input(now.checked_sub(idle).unwrap_or(now));
+        if self.engine.settings().internal_input_only {
+            if new_internal_input {
+                if let Some(input_at) = internal_input {
+                    self.engine.on_input(input_at);
+                }
+            }
+        } else {
+            let idle = platform::idle_duration();
+            self.engine.on_input(now.checked_sub(idle).unwrap_or(now));
+        }
 
         if now.duration_since(self.last_level_poll) >= LEVEL_POLL {
             self.last_level_poll = now;

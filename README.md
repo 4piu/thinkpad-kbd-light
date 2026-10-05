@@ -127,6 +127,40 @@ Controls that cannot apply are greyed out rather than silently ignored: an activ
 Settings live in `%LOCALAPPDATA%\ThinkpadKbdLight\settings.json`. Hand edits are picked up
 within a few seconds, no restart needed.
 
+#### Sunset gate (local Windows Location variant)
+
+In the tray settings, check **Only light after sunset (Windows Location on Save)** and
+click Save. Windows asks for location access if needed. The coordinates are stored only
+in the local settings file; sunset and sunrise are calculated offline. The app then
+keeps automatic lighting off during daylight, while the normal AC/battery and idle
+rules still apply at night. Manual tray choices and Fn+Space still override automation.
+
+The saved location is updated when you save the settings window again. After travelling,
+reopen Settings and click Save to use the new location. If Windows cannot provide a
+location, Save shows an error and leaves the existing settings unchanged. You can
+disable the gate by unchecking it. This uses sunrise and sunset, not cloud cover or a
+light sensor.
+
+#### Built-in input only
+
+Check **Only built-in keyboard / touchpad / TrackPoint wake light** to ignore external
+keyboard and mouse activity for automatic backlighting. Using USB or Bluetooth input
+does not turn the light on or reset its idle timers. Switching to external input lets
+the existing idle timer turn the light off. Built-in input restores normal lighting,
+subject to the sunset gate and power profile. Startup, wake and unlock keep the light
+off until built-in input arrives. Manual Fn+Space and tray choices still override this.
+
+The app reads only the Windows Raw Input header (device identity and input type), never
+key codes, characters, mouse coordinates or button contents. It classifies devices by
+their Plug and Play ancestry: ACPI devices are built-in, while USB and Bluetooth devices
+are external. Unknown devices do not wake the light. Windows precision-touchpad events
+with a zero device handle count as built-in input. On laptops with built-in USB input
+hardware, leave this option disabled; those devices currently count as external.
+
+For diagnosis, `cargo run --release --example input-monitor -- 60` lists the input-device
+classes and reports activity counts for 60 seconds. It does not change the backlight or
+record input contents.
+
 ### The console daemon
 
 ```sh
